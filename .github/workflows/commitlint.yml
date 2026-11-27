@@ -1,0 +1,72 @@
+# Reusable workflow: fails when a commit in the pull request, or the pull
+# request title, does not follow Conventional Commits.
+#
+# Call it from a workflow triggered by pull_request:
+#
+#   on:
+#     pull_request:
+#       types: [opened, edited, synchronize, reopened]
+#   jobs:
+#     commitlint:
+#       uses: InvestLab/.github/.github/workflows/commitlint.yml@main
+
+name: commitlint
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    name: commitlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a pull_request event
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "::error::commitlint needs a pull_request event to know which commits to check"
+          exit 1
+
+      - name: Check out the pull request history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+
+      # Installed outside the checkout so it never mixes with the caller's own
+      # package.json or node_modules.
+      - name: Install commitlint
+        run: |
+          COMMITLINT_DIR="$RUNNER_TEMP/commitlint"
+          npm install --prefix "$COMMITLINT_DIR" --no-save --no-audit --no-fund \
+            @commitlint/cli@21.2.4 @commitlint/config-conventional@21.2.4
+          echo "export default { extends: ['@commitlint/config-conventional'] };" \
+            > "$COMMITLINT_DIR/commitlint.config.mjs"
+          echo "COMMITLINT_DIR=$COMMITLINT_DIR" >> "$GITHUB_ENV"
+
+      - name: Lint every commit in the pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          "$COMMITLINT_DIR/node_modules/.bin/commitlint" \
+            --config "$COMMITLINT_DIR/commitlint.config.mjs" \
+            --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+
+      # Pull requests are squash-merged, so the title becomes the commit on main.
+      # The title is untrusted input: it reaches the shell through an
+      # environment variable, never through ${{ }} inside the script.
+      - name: Lint the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" | "$COMMITLINT_DIR/node_modules/.bin/commitlint" \
+            --config "$COMMITLINT_DIR/commitlint.config.mjs" --verbose

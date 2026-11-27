@@ -1,0 +1,16 @@
+# Checks for pull requests to this repository. The local path runs the
+# commitlint workflow from the pull request itself, so a change to it is
+# tested before it reaches main.
+
+name: pull-request
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    uses: ./.github/workflows/commitlint.yml
